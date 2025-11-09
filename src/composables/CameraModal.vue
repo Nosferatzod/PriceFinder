@@ -1,17 +1,29 @@
 <template>
-  <div class="camera-modal d-flex">
+  <div class="camera-modal" v-if="showModal">
     <div class="camera-overlay" @click="closeCamera"></div>
     <div class="camera-content">
       <div class="camera-header">
-        <h3><i class="fas fa-camera"></i> Tirar Foto do Produto</h3>
+        <h3><i class="fas fa-camera"></i> Câmera</h3>
         <button class="btn-close" @click="closeCamera">
           <i class="fas fa-times"></i>
         </button>
       </div>
       
       <div class="camera-preview">
-        <video ref="videoElement" id="cameraVideo" autoplay playsinline></video>
-        <div class="camera-frame">
+        <div v-if="!cameraActive" class="camera-loading">
+          <div class="spinner"></div>
+          <p>Iniciando câmera...</p>
+        </div>
+        
+        <video 
+          v-else
+          ref="videoElement" 
+          autoplay 
+          playsinline
+          class="camera-video"
+        ></video>
+        
+        <div v-if="cameraActive" class="camera-frame">
           <div class="frame-corner top-left"></div>
           <div class="frame-corner top-right"></div>
           <div class="frame-corner bottom-left"></div>
@@ -19,50 +31,29 @@
         </div>
       </div>
       
-      <div class="camera-instructions">
-        <div class="instruction-item">
-          <i class="fas fa-lightbulb"></i>
-          <span>Use boa iluminação</span>
+      <div class="camera-controls">
+        <div class="camera-info" v-if="cameraError">
+          <i class="fas fa-exclamation-triangle"></i>
+          <p>{{ cameraError }}</p>
         </div>
-        <div class="instruction-item">
-          <i class="fas fa-cube"></i>
-          <span>Centralize o produto</span>
-        </div>
-        <div class="instruction-item">
-          <i class="fas fa-camera"></i>
-          <span>Mantenha a câmera firme</span>
-        </div>
-      </div>
-      
-      <div class="camera-actions">
-        <button class="btn btn-secondary" @click="switchCamera" v-if="hasMultipleCameras">
-          <i class="fas fa-sync-alt"></i> Trocar Câmera
-        </button>
-        <button class="btn btn-success btn-capture" @click="capturePhoto">
-          <i class="fas fa-camera"></i> Capturar Foto
-        </button>
-        <button class="btn btn-outline-secondary" @click="closeCamera">
-          Cancelar
-        </button>
-      </div>
-      
-      <div class="camera-error" v-if="error">
-        <i class="fas fa-exclamation-triangle"></i>
-        <p>{{ error }}</p>
-      </div>
-    </div>
-    
-    <!-- Preview da foto capturada -->
-    <div v-if="capturedPhoto" class="photo-preview-modal">
-      <div class="preview-content">
-        <h4>Preview da Foto</h4>
-        <img :src="capturedPhoto" alt="Foto capturada" class="preview-image">
-        <div class="preview-actions">
-          <button class="btn btn-success" @click="confirmPhoto">
-            <i class="fas fa-check"></i> Usar Esta Foto
+        
+        <div class="camera-buttons">
+          <button 
+            class="btn btn-capture" 
+            @click="capturePhoto"
+            :disabled="!cameraActive"
+          >
+            <i class="fas fa-camera"></i>
+            Tirar Foto
           </button>
-          <button class="btn btn-outline-secondary" @click="retakePhoto">
-            <i class="fas fa-redo"></i> Tirar Outra
+          
+          <button 
+            class="btn btn-switch" 
+            @click="switchCamera"
+            v-if="hasMultipleCameras && cameraActive"
+          >
+            <i class="fas fa-sync-alt"></i>
+            Trocar
           </button>
         </div>
       </div>
@@ -75,32 +66,46 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 export default {
   name: 'CameraModal',
+  props: {
+    showModal: Boolean
+  },
   emits: ['capture', 'close'],
   setup(props, { emit }) {
     const videoElement = ref(null)
     const stream = ref(null)
-    const error = ref('')
+    const cameraActive = ref(false)
+    const cameraError = ref('')
     const hasMultipleCameras = ref(false)
-    const capturedPhoto = ref('')
-    const isFrontCamera = ref(false)
+    const currentFacingMode = ref('environment')
+    const devices = ref([])
 
     onMounted(async () => {
-      try {
-        await initializeCamera()
-        checkMultipleCameras()
-      } catch (err) {
-        error.value = 'Não foi possível acessar a câmera. Verifique as permissões.'
-        console.error('Erro ao acessar a câmera:', err)
+      await checkCameras()
+      if (props.showModal) {
+        initializeCamera()
       }
     })
 
-    onUnmounted(() => {
-      stopCamera()
-    })
+    const checkCameras = async () => {
+      try {
+        const mediaDevices = await navigator.mediaDevices.enumerateDevices()
+        devices.value = mediaDevices.filter(device => device.kind === 'videoinput')
+        hasMultipleCameras.value = devices.value.length > 1
+        console.log('Câmeras disponíveis:', devices.value.length)
+      } catch (error) {
+        console.error('Erro ao verificar câmeras:', error)
+      }
+    }
 
     const initializeCamera = async (facingMode = 'environment') => {
-      stopCamera()
+      cameraError.value = ''
+      cameraActive.value = false
       
+      // Parar stream anterior se existir
+      if (stream.value) {
+        stream.value.getTracks().forEach(track => track.stop())
+      }
+
       try {
         const constraints = {
           video: { 
@@ -111,94 +116,89 @@ export default {
         }
         
         stream.value = await navigator.mediaDevices.getUserMedia(constraints)
+        
         if (videoElement.value) {
           videoElement.value.srcObject = stream.value
+          videoElement.value.onloadedmetadata = () => {
+            cameraActive.value = true
+          }
         }
-        isFrontCamera.value = facingMode === 'user'
-      } catch (err) {
-        throw new Error('Câmera não disponível')
+        
+        currentFacingMode.value = facingMode
+      } catch (error) {
+        console.error('Erro ao acessar câmera:', error)
+        cameraError.value = this.getErrorMessage(error)
+        
+        // Tentar câmera frontal se a traseira falhar
+        if (facingMode === 'environment' && !cameraError.value.includes('permissão')) {
+          setTimeout(() => initializeCamera('user'), 1000)
+        }
       }
     }
 
-    const stopCamera = () => {
-      if (stream.value) {
-        stream.value.getTracks().forEach(track => track.stop())
-        stream.value = null
+    const getErrorMessage = (error) => {
+      if (error.name === 'NotAllowedError') {
+        return 'Permissão de câmera negada. Por favor, permita o acesso à câmera.'
+      } else if (error.name === 'NotFoundError') {
+        return 'Nenhuma câmera encontrada no dispositivo.'
+      } else if (error.name === 'NotSupportedError') {
+        return 'Navegador não suporta acesso à câmera.'
+      } else if (error.name === 'NotReadableError') {
+        return 'Câmera está sendo usada por outro aplicativo.'
+      } else {
+        return 'Erro ao acessar a câmera: ' + error.message
       }
     }
 
-    const checkMultipleCameras = async () => {
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices()
-        const videoDevices = devices.filter(device => device.kind === 'videoinput')
-        hasMultipleCameras.value = videoDevices.length > 1
-      } catch (err) {
-        console.error('Erro ao verificar câmeras:', err)
-      }
-    }
-
-    const switchCamera = async () => {
-      try {
-        const newFacingMode = isFrontCamera.value ? 'environment' : 'user'
-        await initializeCamera(newFacingMode)
-      } catch (err) {
-        error.value = 'Erro ao trocar de câmera'
-      }
+    const switchCamera = () => {
+      const newFacingMode = currentFacingMode.value === 'environment' ? 'user' : 'environment'
+      initializeCamera(newFacingMode)
     }
 
     const capturePhoto = () => {
-      if (!videoElement.value) return
+      if (!videoElement.value || !cameraActive.value) return
       
       const canvas = document.createElement('canvas')
       const context = canvas.getContext('2d')
       
+      // Usar dimensões reais do vídeo
       canvas.width = videoElement.value.videoWidth
       canvas.height = videoElement.value.videoHeight
       
+      // Desenhar a imagem no canvas
       context.drawImage(videoElement.value, 0, 0, canvas.width, canvas.height)
       
+      // Converter para blob
       canvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob)
-        capturedPhoto.value = url
-        stopCamera()
+        if (blob) {
+          const file = new File([blob], 'photo.jpg', { 
+            type: 'image/jpeg',
+            lastModified: Date.now()
+          })
+          emit('capture', file)
+          closeCamera()
+        } else {
+          cameraError.value = 'Erro ao capturar foto'
+        }
       }, 'image/jpeg', 0.9)
     }
 
-    const confirmPhoto = () => {
-      if (capturedPhoto.value) {
-        // Converter URL do blob para File
-        fetch(capturedPhoto.value)
-          .then(res => res.blob())
-          .then(blob => {
-            const file = new File([blob], 'camera-photo.jpg', { type: 'image/jpeg' })
-            emit('capture', file)
-            closeCamera()
-          })
-      }
-    }
-
-    const retakePhoto = () => {
-      capturedPhoto.value = ''
-      initializeCamera(isFrontCamera.value ? 'user' : 'environment')
-    }
-
     const closeCamera = () => {
-      stopCamera()
-      if (capturedPhoto.value) {
-        URL.revokeObjectURL(capturedPhoto.value)
+      if (stream.value) {
+        stream.value.getTracks().forEach(track => track.stop())
+        stream.value = null
       }
+      cameraActive.value = false
       emit('close')
     }
 
     return {
       videoElement,
-      error,
+      cameraActive,
+      cameraError,
       hasMultipleCameras,
-      capturedPhoto,
       capturePhoto,
       switchCamera,
-      confirmPhoto,
-      retakePhoto,
       closeCamera
     }
   }
@@ -213,6 +213,9 @@ export default {
   width: 100%;
   height: 100%;
   z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .camera-overlay {
@@ -228,13 +231,14 @@ export default {
   position: relative;
   background: white;
   border-radius: 20px;
-  padding: 0;
   width: 95%;
   max-width: 500px;
-  margin: auto;
+  max-height: 90vh;
   z-index: 1001;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .camera-header {
@@ -242,7 +246,6 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  border-bottom: 1px solid #eee;
   background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
   color: white;
 }
@@ -253,15 +256,15 @@ export default {
 }
 
 .btn-close {
-  background: none;
+  background: rgba(255, 255, 255, 0.2);
   border: none;
   color: white;
   font-size: 1.2rem;
   cursor: pointer;
-  padding: 5px;
+  padding: 8px;
   border-radius: 50%;
-  width: 35px;
-  height: 35px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -269,7 +272,7 @@ export default {
 }
 
 .btn-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .camera-preview {
@@ -277,10 +280,28 @@ export default {
   width: 100%;
   height: 400px;
   background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
 }
 
-#cameraVideo {
+.camera-loading {
+  color: white;
+  text-align: center;
+}
+
+.camera-loading .spinner {
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top: 3px solid white;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 15px;
+}
+
+.camera-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -291,161 +312,117 @@ export default {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 280px;
-  height: 280px;
-  border: 2px solid rgba(255, 255, 255, 0.8);
-  border-radius: 15px;
+  width: 250px;
+  height: 250px;
+  pointer-events: none;
 }
 
 .frame-corner {
   position: absolute;
-  width: 30px;
-  height: 30px;
-  border: 3px solid white;
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
 }
 
 .frame-corner.top-left {
-  top: -3px;
-  left: -3px;
+  top: 0;
+  left: 0;
   border-right: none;
   border-bottom: none;
-  border-radius: 10px 0 0 0;
 }
 
 .frame-corner.top-right {
-  top: -3px;
-  right: -3px;
+  top: 0;
+  right: 0;
   border-left: none;
   border-bottom: none;
-  border-radius: 0 10px 0 0;
 }
 
 .frame-corner.bottom-left {
-  bottom: -3px;
-  left: -3px;
+  bottom: 0;
+  left: 0;
   border-right: none;
   border-top: none;
-  border-radius: 0 0 0 10px;
 }
 
 .frame-corner.bottom-right {
-  bottom: -3px;
-  right: -3px;
+  bottom: 0;
+  right: 0;
   border-left: none;
   border-top: none;
-  border-radius: 0 0 10px 0;
 }
 
-.camera-instructions {
-  display: flex;
-  justify-content: space-around;
+.camera-controls {
   padding: 20px;
   background: #f8f9fa;
-  border-bottom: 1px solid #eee;
 }
 
-.instruction-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  text-align: center;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.instruction-item i {
-  font-size: 1.2rem;
-  color: var(--primary);
-}
-
-.camera-actions {
-  display: flex;
-  gap: 12px;
-  padding: 20px;
-  flex-wrap: wrap;
-}
-
-.camera-actions .btn {
-  flex: 1;
-  min-width: 120px;
-  justify-content: center;
-}
-
-.btn-capture {
-  background: linear-gradient(135deg, var(--success) 0%, var(--accent) 100%);
-  border: none;
-  font-weight: 600;
-  padding: 15px 20px;
-}
-
-.btn-capture:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(40, 167, 69, 0.3);
-}
-
-.camera-error {
-  background: #fee;
-  border: 1px solid #f5c6cb;
+.camera-info {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
   border-radius: 8px;
   padding: 15px;
-  margin: 0 20px 20px;
+  margin-bottom: 15px;
   text-align: center;
-  color: #721c24;
+  color: #856404;
 }
 
-.camera-error i {
+.camera-info i {
   font-size: 1.5rem;
   margin-bottom: 10px;
   display: block;
 }
 
-.photo-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.95);
-  z-index: 1002;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.preview-content {
-  background: white;
-  border-radius: 15px;
-  padding: 25px;
-  max-width: 400px;
-  width: 90%;
-  text-align: center;
-}
-
-.preview-content h4 {
-  margin-bottom: 20px;
-  color: var(--dark);
-}
-
-.preview-image {
-  width: 100%;
-  max-height: 300px;
-  object-fit: contain;
-  border-radius: 10px;
-  margin-bottom: 20px;
-  border: 2px solid #eee;
-}
-
-.preview-actions {
+.camera-buttons {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.preview-actions .btn {
-  flex: 1;
-  min-width: 140px;
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 25px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-capture {
+  background: linear-gradient(135deg, var(--success) 0%, var(--accent) 100%);
+  color: white;
+  flex: 2;
   justify-content: center;
+  font-size: 1.1rem;
+}
+
+.btn-capture:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(40, 167, 69, 0.3);
+}
+
+.btn-switch {
+  background: var(--light);
+  color: var(--dark);
+  border: 2px solid #dee2e6;
+  flex: 1;
+}
+
+.btn-switch:hover {
+  background: #e9ecef;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 @media (max-width: 768px) {
@@ -461,21 +438,17 @@ export default {
   }
   
   .camera-frame {
-    width: 250px;
-    height: 250px;
+    width: 200px;
+    height: 200px;
   }
   
-  .camera-instructions {
-    flex-direction: column;
-    gap: 15px;
-  }
-  
-  .camera-actions {
+  .camera-buttons {
     flex-direction: column;
   }
   
-  .preview-actions {
-    flex-direction: column;
+  .btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

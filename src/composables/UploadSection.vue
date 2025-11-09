@@ -16,19 +16,10 @@
       </div>
       <p class="upload-text">Arraste uma imagem aqui ou clique para selecionar</p>
       <p class="upload-info">Formatos suportados: JPG, PNG, WebP (máx. 10MB)</p>
-      <div class="upload-features">
-        <div class="feature-item">
-          <i class="fas fa-brain"></i>
-          <span>Reconhecimento por IA</span>
-        </div>
-        <div class="feature-item">
-          <i class="fas fa-bolt"></i>
-          <span>Busca em tempo real</span>
-        </div>
-        <div class="feature-item">
-          <i class="fas fa-store"></i>
-          <span>+50 lojas comparadas</span>
-        </div>
+      
+      <!-- Debug info -->
+      <div class="debug-info" v-if="debugInfo">
+        <small>{{ debugInfo }}</small>
       </div>
     </div>
     
@@ -42,20 +33,21 @@
     
     <div class="action-buttons">
       <button class="btn btn-primary" @click="onCaptureClick" :disabled="!cameraSupported">
-        <i class="fas fa-camera"></i> Tirar Foto
+        <i class="fas fa-camera"></i> 
+        {{ cameraSupported ? 'Tirar Foto' : 'Câmera Não Disponível' }}
       </button>
       <button class="btn btn-outline-primary" @click="onSampleClick">
         <i class="fas fa-images"></i> Usar Exemplo
       </button>
     </div>
-    
-    <div class="upload-tips">
-      <h4>Dicas para melhor reconhecimento:</h4>
+
+    <div class="browser-support">
+      <h4>Suporte do Navegador:</h4>
       <ul>
-        <li>📸 Tire a foto com boa iluminação</li>
-        <li>🎯 Foque no produto principal</li>
-        <li>📱 Evite imagens muito escuras ou borradas</li>
-        <li>🛍️ Mostre o produto de diferentes ângulos</li>
+        <li>✅ Chrome: Câmera + Upload</li>
+        <li>✅ Firefox: Câmera + Upload</li>
+        <li>✅ Safari: Câmera + Upload</li>
+        <li>⚠️ Edge: Câmera + Upload</li>
       </ul>
     </div>
   </section>
@@ -70,15 +62,29 @@ export default {
   setup(props, { emit }) {
     const fileInput = ref(null)
     const isDragOver = ref(false)
-    const cameraSupported = ref(true)
+    const cameraSupported = ref(false)
+    const debugInfo = ref('')
 
     onMounted(() => {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        cameraSupported.value = false
-      }
+      checkCameraSupport()
     })
 
+    const checkCameraSupport = () => {
+      const hasMediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+      const isHTTPS = window.location.protocol === 'https:' || window.location.hostname === 'localhost'
+      
+      cameraSupported.value = hasMediaDevices && isHTTPS
+      
+      debugInfo.value = `MediaDevices: ${hasMediaDevices}, HTTPS: ${isHTTPS}`
+      console.log('Suporte à câmera:', {
+        mediaDevices: hasMediaDevices,
+        https: isHTTPS,
+        supported: cameraSupported.value
+      })
+    }
+
     const onUploadAreaClick = () => {
+      console.log('Clicando no upload area...')
       fileInput.value.click()
     }
 
@@ -96,6 +102,8 @@ export default {
       isDragOver.value = false
       
       const files = e.dataTransfer.files
+      console.log('Arquivos soltos:', files.length)
+      
       if (files.length > 0) {
         emit('file-selected', files[0])
       }
@@ -103,16 +111,20 @@ export default {
 
     const onFileSelect = (e) => {
       const file = e.target.files[0]
+      console.log('Arquivo selecionado via input:', file)
+      
       if (file) {
         emit('file-selected', file)
       }
     }
 
     const onCaptureClick = () => {
+      console.log('Abrindo câmera...')
       emit('open-camera')
     }
 
     const onSampleClick = () => {
+      console.log('Usando exemplo...')
       emit('use-sample')
     }
 
@@ -120,6 +132,7 @@ export default {
       fileInput,
       isDragOver,
       cameraSupported,
+      debugInfo,
       onUploadAreaClick,
       onDragOver,
       onDragLeave,
@@ -133,119 +146,34 @@ export default {
 </script>
 
 <style scoped>
-.upload-section {
-  text-align: center;
+.debug-info {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 5px;
+  font-family: monospace;
 }
 
-.upload-area {
-  border: 3px dashed var(--primary);
-  border-radius: 20px;
-  padding: 60px 30px;
-  margin: 25px 0;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background: rgba(106, 17, 203, 0.03);
-}
-
-.upload-area.active {
-  border-color: var(--accent);
-  background: rgba(0, 184, 148, 0.05);
-  transform: scale(1.02);
-}
-
-.upload-area:hover {
-  background: rgba(106, 17, 203, 0.08);
-  border-color: var(--secondary);
-}
-
-.upload-icon {
-  font-size: 70px;
-  color: var(--primary);
-  margin-bottom: 20px;
-}
-
-.upload-text {
-  font-size: 1.4rem;
-  margin-bottom: 10px;
-  font-weight: 600;
-  color: var(--dark);
-}
-
-.upload-info {
-  color: #666;
-  margin-bottom: 30px;
-  font-size: 1rem;
-}
-
-.upload-features {
-  display: flex;
-  justify-content: center;
-  gap: 30px;
+.browser-support {
   margin-top: 20px;
-  flex-wrap: wrap;
-}
-
-.feature-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--primary);
-  font-weight: 500;
-}
-
-.feature-item i {
-  font-size: 1.2rem;
-}
-
-.upload-tips {
-  margin-top: 30px;
-  padding: 20px;
-  background: rgba(0, 184, 148, 0.05);
+  padding: 15px;
+  background: #f8f9fa;
   border-radius: 10px;
   text-align: left;
 }
 
-.upload-tips h4 {
-  color: var(--accent);
-  margin-bottom: 15px;
-  text-align: center;
+.browser-support h4 {
+  margin-bottom: 10px;
+  color: var(--dark);
 }
 
-.upload-tips ul {
+.browser-support ul {
   list-style: none;
   padding: 0;
 }
 
-.upload-tips li {
-  padding: 8px 0;
-  color: #555;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-top: 20px;
-}
-
-@media (max-width: 768px) {
-  .upload-area {
-    padding: 40px 20px;
-  }
-  
-  .upload-features {
-    flex-direction: column;
-    gap: 15px;
-  }
-  
-  .action-buttons {
-    flex-direction: column;
-  }
-  
-  .btn {
-    width: 100%;
-    justify-content: center;
-  }
+.browser-support li {
+  padding: 5px 0;
+  font-size: 0.9rem;
 }
 </style>

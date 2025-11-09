@@ -40,7 +40,7 @@
     
     <!-- Modal da Câmera -->
     <CameraModal 
-      v-if="showCamera"
+      :show-modal="showCamera"
       @capture="handleCameraCapture"
       @close="closeCamera"
     />
@@ -55,7 +55,7 @@ import { usePriceSearch } from '@/composables/usePriceSearch'
 // Components
 import AppHeader from '@/composables/Header.vue'
 import UploadSection from '@/composables/UploadSection.vue'
-import PreviewSection from '@/composables/UploadSection.vue'
+import PreviewSection from '@/composables/PreviewSection.vue'
 import LoadingSection from '@/composables/LoadingSection.vue'
 import ResultsSection from '@/composables/ResultsSection.vue'
 import AppFooter from '@/composables/Footer.vue'
@@ -87,6 +87,8 @@ export default {
 
     // Manipulação de arquivos
     const handleFileSelected = async (file) => {
+      console.log('Arquivo selecionado:', file.name, file.type, file.size)
+      
       const validation = validateImage(file)
       if (!validation.isValid) {
         alert(validation.message)
@@ -97,6 +99,8 @@ export default {
       
       try {
         const result = await processImage(file)
+        console.log('Processamento concluído:', result.productData)
+        
         currentImageUrl.value = result.imageUrl
         currentProductData.value = result.productData
         showPreviewSection()
@@ -109,38 +113,75 @@ export default {
 
     // Câmera
     const openCamera = () => {
+      console.log('Abrindo câmera...')
       showCamera.value = true
     }
 
     const closeCamera = () => {
+      console.log('Fechando câmera...')
       showCamera.value = false
     }
 
     const handleCameraCapture = (file) => {
+      console.log('Foto capturada:', file)
       handleFileSelected(file)
-      closeCamera()
     }
 
     // Imagem de exemplo
     const useSampleImage = () => {
+      console.log('Usando imagem de exemplo...')
       const sampleImages = [
-        'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
-        'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
-        'https://images.unsplash.com/photo-1542291026-7eec264c27ff?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
-        'https://images.unsplash.com/photo-1585155770447-2f66e2a397b5?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80'
+        'https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
+        'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80',
+        'https://images.unsplash.com/photo-1542291026-7eec264c27ff?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80'
       ]
       
       const randomImage = sampleImages[Math.floor(Math.random() * sampleImages.length)]
+      console.log('Carregando imagem:', randomImage)
       
+      // Criar uma imagem de exemplo local se o fetch falhar
+      const fallbackImage = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 400
+        canvas.height = 300
+        const ctx = canvas.getContext('2d')
+        
+        // Fundo gradiente
+        const gradient = ctx.createLinearGradient(0, 0, 400, 300)
+        gradient.addColorStop(0, '#6a11cb')
+        gradient.addColorStop(1, '#2575fc')
+        ctx.fillStyle = gradient
+        ctx.fillRect(0, 0, 400, 300)
+        
+        // Texto
+        ctx.fillStyle = 'white'
+        ctx.font = 'bold 24px Arial'
+        ctx.textAlign = 'center'
+        ctx.fillText('📸 Imagem de Exemplo', 200, 150)
+        ctx.font = '16px Arial'
+        ctx.fillText('Clique em "Usar Exemplo" para testar', 200, 180)
+        
+        return new Promise((resolve) => {
+          canvas.toBlob(blob => {
+            const file = new File([blob], 'exemplo.jpg', { type: 'image/jpeg' })
+            resolve(file)
+          }, 'image/jpeg', 0.9)
+        })
+      }
+      
+      // Tentar carregar da URL, se falhar usar fallback
       fetch(randomImage)
-        .then(response => response.blob())
+        .then(response => {
+          if (!response.ok) throw new Error('Falha no carregamento')
+          return response.blob()
+        })
         .then(blob => {
-          const file = new File([blob], 'sample-image.jpg', { type: 'image/jpeg' })
+          const file = new File([blob], 'exemplo.jpg', { type: 'image/jpeg' })
           handleFileSelected(file)
         })
         .catch(error => {
-          console.error('Erro ao carregar imagem de exemplo:', error)
-          alert('Erro ao carregar imagem de exemplo. Tente novamente.')
+          console.log('Usando imagem fallback:', error)
+          fallbackImage().then(handleFileSelected)
         })
     }
 
@@ -169,10 +210,12 @@ export default {
 
     // Busca de preços
     const searchPrices = async () => {
+      console.log('Iniciando busca de preços...')
       showLoadingSection('Buscando os melhores preços...')
       
       try {
         const results = await searchPricesApi(currentProductData.value)
+        console.log('Resultados encontrados:', results.length)
         searchResults.value = results
         showResultsSection()
       } catch (error) {
@@ -198,23 +241,7 @@ export default {
 
     // Modal de contato
     const showContactModal = () => {
-      const contactInfo = `
-🎯 PriceFinder - Parcerias Comerciais
-
-📧 Email: parceiros@pricefinder.com
-📞 Telefone: (11) 99999-9999
-💼 Site: www.pricefinder.com/parcerias
-
-🚀 O que oferecemos:
-• Tecnologia de IA avançada
-• Integração com seu e-commerce
-• Aumento de conversão em até 30%
-• Suporte técnico dedicado
-
-💡 Interessado? Entre em contato para uma demonstração!
-      `.trim()
-      
-      alert(contactInfo)
+      alert('📧 Email: contato@pricefinder.com\n📞 Telefone: (11) 99999-9999\n\nEntre em contato para parcerias!')
     }
 
     return {
@@ -241,38 +268,3 @@ export default {
   }
 }
 </script>
-
-<style scoped>
-.home {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-}
-
-.main-content {
-  padding-bottom: 40px;
-}
-
-/* Animações de transição */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.5s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-.slide-enter-active,
-.slide-leave-active {
-  transition: transform 0.5s ease;
-}
-
-.slide-enter-from {
-  transform: translateX(100%);
-}
-
-.slide-leave-to {
-  transform: translateX(-100%);
-}
-</style>
